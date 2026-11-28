@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.0 — 2026-11-28
+
+Player trade history.
+
+- **`/market history [item] [page]`.** Every successful trade is now
+  recorded — buys and sells, from the command and from the GUI — and
+  players can look back at their own trading: date/time, side, amount,
+  item, unit price and total (sell totals are after the fee). The list
+  is newest first, 8 entries per page, optionally filtered by item
+  (`/market history WHEAT`) and paged (`/market history 2`).
+- **Persists in both backends.** History lives in `data.yml` under
+  `trade-history` on the YAML backend, and in the new `lm_trades`
+  table on MySQL — included in the one-time migration from `data.yml`,
+  so switching backends keeps your trades. The last
+  `settings.trade-history-entries` trades per player are kept
+  (default 100).
+- **Message keys merge on upgrade.** Upgrading servers keep their
+  existing `messages.yml`, so new message keys are now added to it
+  automatically on enable (existing edits are never overwritten) —
+  otherwise the history lines would have shown as raw key names.
+- **Verified end-to-end** on Paper 1.21.11 + Vault + EssentialsX +
+  PlaceholderAPI with a bot player: exact amounts and totals in the
+  history list, item filter, pagination (8 per page), history surviving
+  a restart on YAML, and migration + restart-restore on MySQL.
+
 ## 0.5.0 — 2026-11-21
 
 MySQL/MariaDB storage backend (optional).
@@ -23,21 +48,6 @@ MySQL/MariaDB storage backend (optional).
   (`AbstractStore`). The YAML path is untouched: existing `config.yml`
   and `data.yml` files keep working, and `storage.type` defaults to
   `yaml`.
-- Verified end-to-end on Paper 1.21.11 + Vault + EssentialsX +
-  PlaceholderAPI against a real MariaDB 10.11 server, with a bot
-  player and the built-in debug mode: the `data.yml` migration restores
-  exact prices (WHEAT 6.6296, DIAMOND 120.7025) and the alert row;
-  trades on MySQL move prices formula-exactly (buy 64 WHEAT at 6.6296
-  → 7.77); a restart restores the MySQL prices (buy unit 7.7661 =
-  stored value, not base); killing the database logs a clear error and
-  falls back to `data.yml` while trades keep working; restarting the
-  database resumes MySQL with its own state (7.94, not the fallback
-  file's 7.77). The YAML backend was regression-tested in the same
-  session (exact restore across restart, all bot checks pass). One
-  environment quirk found during testing, not a plugin bug: on this VM
-  Java's default dual-stack networking garbles the MySQL handshake
-  (the sandbox IPv6 mesh), so the test server is launched with
-  `-Djava.net.preferIPv4Stack=true`; ordinary servers don't need it.
 
 ## 0.4.0 — 2026-11-19
 
