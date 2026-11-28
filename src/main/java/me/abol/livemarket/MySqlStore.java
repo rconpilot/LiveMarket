@@ -42,8 +42,13 @@ public final class MySqlStore extends AbstractStore {
     /** One persisted alert row. */
     private record AlertRow(String uuid, String material, boolean above, double target) {}
 
+    /** One persisted trade row (a player's own trade history). */
+    private record TradeRow(String uuid, long time, String material, boolean buy,
+                            int amount, double unit, double total) {}
+
     /** A full snapshot, taken on the calling thread before the async write. */
-    private record Snapshot(String day, List<PriceRow> prices, List<AlertRow> alerts) {}
+    private record Snapshot(String day, List<PriceRow> prices, List<AlertRow> alerts,
+                            List<TradeRow> trades) {}
 
     private final String host;
     private final int port;
@@ -97,6 +102,12 @@ public final class MySqlStore extends AbstractStore {
                     + "`player_uuid` CHAR(36) NOT NULL, `material` VARCHAR(64) NOT NULL, "
                     + "`above` TINYINT(1) NOT NULL, `target` DOUBLE NOT NULL, "
                     + "PRIMARY KEY (`player_uuid`, `material`))");
+            stmt.executeUpdate("CREATE TABLE IF NOT EXISTS `" + prefix + "trades` ("
+                    + "`id` BIGINT AUTO_INCREMENT PRIMARY KEY, "
+                    + "`player_uuid` CHAR(36) NOT NULL, `ts` BIGINT NOT NULL, "
+                    + "`material` VARCHAR(64) NOT NULL, `buy` TINYINT(1) NOT NULL, "
+                    + "`amount` INT NOT NULL, `unit` DOUBLE NOT NULL, `total` DOUBLE NOT NULL, "
+                    + "INDEX (`player_uuid`, `ts`))");
         }
         debug.log("STORE", "MySQL connected " + describe());
     }
@@ -107,12 +118,13 @@ public final class MySqlStore extends AbstractStore {
             ensureConnection();
             if (isEmpty() && new YamlStore(plugin, engine, debug).dataFile().exists()) {
                 // First run on MySQL with an existing data.yml: adopt its state.
-                // Prices/history live in the engine (shared), but alerts live
-                // in the store instance — copy them over, or the migration
-                // would silently drop every alert.
+                // Prices/history live in the engine (shared), but alerts and
+                // trade history live in the store instance — copy them over,
+                // or the migration would silently drop every alert and trade.
                 YamlStore yaml = new YamlStore(plugin, engine, debug);
                 yaml.load();
                 alerts.putAll(yaml.allAlerts());
+                trades.putAll(yaml.allTrades());
                 saveNow();
                 plugin.getLogger().info("Migrated market state from data.yml into MySQL.");
                 return;
@@ -175,9 +187,30 @@ public final class MySqlStore extends AbstractStore {
                     }
                 }
             }
+            try (Statement stmt = connection.createStatement();
+                 ResultSet rs = stmt.executeQuery(
+                         "SELECT `player_uuid`, `ts`, `material`, `buy`, `amount`, `unit`, `total`"
+                                 + " FROM `" + prefix + "trades`"
+                                 + " ORDER BY `player_uuid`, `ts` DESC")) {
+                while (rs.next()) {
+                    try {
+                        UUID uuid = UUID.fromString(rs.getString(1));
+                        Material material = Material.matchMaterial(rs.getString(3));
+                        if (material != null) {
+                            restoreTrade(uuid, new TradeRecord(rs.getLong(2), material,
+                                    rs.getBoolean(4), rs.getInt(5),
+                                    rs.getDouble(6), rs.getDouble(7)));
+                        }
+                    } catch (IllegalArgumentException ignored) {
+                        // Skip malformed rows rather than failing the load.
+                    }
+                }
+            }
             int alertCount = alerts.values().stream().mapToInt(List::size).sum();
+            int tradeCount = trades.values().stream().mapToInt(List::size).sum();
             debug.log("STORE", "loaded MySQL day=" + engine.currentDay()
-                    + " items=" + engine.allStates().size() + " alerts=" + alertCount);
+                    + " items=" + engine.allStates().size() + " alerts=" + alertCount
+                    + " trades=" + tradeCount);
         } catch (SQLException e) {
             plugin.getLogger().severe("Could not load market state from MySQL: " + e.getMessage()
                     + " — starting with base prices.");
@@ -244,7 +277,15 @@ public final class MySqlStore extends AbstractStore {
                         alert.material().name(), alert.above(), alert.target()));
             }
         }
-        return new Snapshot(engine.currentDay(), prices, alertRows);
+        List<TradeRow> tradeRows = new ArrayList<>();
+        for (Map.Entry<UUID, List<TradeRecord>> entry : trades.entrySet()) {
+            for (TradeRecord record : entry.getValue()) {
+                tradeRows.add(new TradeRow(entry.getKey().toString(), record.time(),
+                        record.material().name(), record.buy(), record.amount(),
+                        record.unit(), record.total()));
+            }
+        }
+        return new Snapshot(engine.currentDay(), prices, alertRows, tradeRows);
     }
 
     /** Replace the whole persisted state in one transaction. */
@@ -261,6 +302,7 @@ public final class MySqlStore extends AbstractStore {
             try (Statement stmt = connection.createStatement()) {
                 stmt.executeUpdate("DELETE FROM `" + prefix + "prices`");
                 stmt.executeUpdate("DELETE FROM `" + prefix + "alerts`");
+                stmt.executeUpdate("DELETE FROM `" + prefix + "trades`");
             }
             try (PreparedStatement prices = connection.prepareStatement(
                     "INSERT INTO `" + prefix + "prices`"
@@ -288,6 +330,22 @@ public final class MySqlStore extends AbstractStore {
                     alertStmt.addBatch();
                 }
                 alertStmt.executeBatch();
+            }
+            try (PreparedStatement tradeStmt = connection.prepareStatement(
+                    "INSERT INTO `" + prefix + "trades`"
+                            + " (`player_uuid`, `ts`, `material`, `buy`, `amount`, `unit`, `total`)"
+                            + " VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+                for (TradeRow row : snapshot.trades()) {
+                    tradeStmt.setString(1, row.uuid());
+                    tradeStmt.setLong(2, row.time());
+                    tradeStmt.setString(3, row.material());
+                    tradeStmt.setBoolean(4, row.buy());
+                    tradeStmt.setInt(5, row.amount());
+                    tradeStmt.setDouble(6, row.unit());
+                    tradeStmt.setDouble(7, row.total());
+                    tradeStmt.addBatch();
+                }
+                tradeStmt.executeBatch();
             }
             connection.commit();
         } catch (SQLException e) {

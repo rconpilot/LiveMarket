@@ -67,9 +67,10 @@ public final class YamlStore extends AbstractStore {
         }
         restore(data);
         int alertCount = alerts.values().stream().mapToInt(List::size).sum();
+        int tradeCount = trades.values().stream().mapToInt(List::size).sum();
         debug.log("STORE", "loaded data.yml day=" + engine.currentDay()
                 + " items=" + engine.allStates().size() + " alerts=" + alertCount
-                + " bytes=" + file.length());
+                + " trades=" + tradeCount + " bytes=" + file.length());
     }
 
     /** Restore engine state + alerts from a parsed data.yml document. */
@@ -144,6 +145,22 @@ public final class YamlStore extends AbstractStore {
                 }
             }
         }
+        var tradesSection = data.getConfigurationSection("trade-history");
+        if (tradesSection != null) {
+            for (String uuidKey : tradesSection.getKeys(false)) {
+                try {
+                    UUID uuid = UUID.fromString(uuidKey);
+                    for (String encoded : tradesSection.getStringList(uuidKey)) {
+                        TradeRecord record = decodeTrade(encoded);
+                        if (record != null) {
+                            restoreTrade(uuid, record);
+                        }
+                    }
+                } catch (IllegalArgumentException ignored) {
+                    // Skip malformed entries rather than failing the load.
+                }
+            }
+        }
     }
 
     /** Serialize now (cheap, in memory); write the file asynchronously. */
@@ -202,6 +219,13 @@ public final class YamlStore extends AbstractStore {
                 encoded.add(alert.material().name() + "|" + alert.above() + "|" + alert.target());
             }
             data.set("alerts." + entry.getKey(), encoded);
+        }
+        for (Map.Entry<UUID, List<TradeRecord>> entry : trades.entrySet()) {
+            List<String> encoded = new ArrayList<>();
+            for (TradeRecord record : entry.getValue()) {
+                encoded.add(encodeTrade(record));
+            }
+            data.set("trade-history." + entry.getKey(), encoded);
         }
         return data.saveToString();
     }

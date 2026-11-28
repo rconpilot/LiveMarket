@@ -1,6 +1,10 @@
 package me.abol.livemarket;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Material;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -32,6 +36,7 @@ public final class LiveMarket extends JavaPlugin {
         if (!new File(getDataFolder(), "messages.yml").exists()) {
             saveResource("messages.yml", false);
         }
+        mergeMissingMessages();
         msg = new Msg(this);
         debug = new Debug(this, getConfig().getBoolean("settings.debug", false));
 
@@ -162,6 +167,46 @@ public final class LiveMarket extends JavaPlugin {
             manager.setPaused(!getConfig().getBoolean("settings.trading-enabled", true));
         }
         store.markDirty();
+    }
+
+    /**
+     * Add any message keys the jar ships that the server's messages.yml
+     * lacks, so an upgrade picks up new messages without wiping an
+     * admin's edits. The help list is merged line by line for the same
+     * reason — a key that already exists is never overwritten.
+     */
+    private void mergeMissingMessages() {
+        File file = new File(getDataFolder(), "messages.yml");
+        YamlConfiguration current = YamlConfiguration.loadConfiguration(file);
+        try (var in = getResource("messages.yml")) {
+            if (in == null) {
+                return;
+            }
+            YamlConfiguration defaults = YamlConfiguration.loadConfiguration(
+                    new InputStreamReader(in, StandardCharsets.UTF_8));
+            boolean changed = false;
+            for (String key : defaults.getKeys(true)) {
+                if (defaults.isConfigurationSection(key) || current.contains(key)) {
+                    continue;
+                }
+                current.set(key, defaults.get(key));
+                changed = true;
+            }
+            List<String> help = current.getStringList("help");
+            for (String line : defaults.getStringList("help")) {
+                if (!help.contains(line)) {
+                    help.add(line);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                current.set("help", help);
+                current.save(file);
+                getLogger().info("messages.yml: added new message keys from the update.");
+            }
+        } catch (IOException e) {
+            getLogger().warning("Could not merge new message keys: " + e.getMessage());
+        }
     }
 
     FileConfiguration loadMessagesFile() {
