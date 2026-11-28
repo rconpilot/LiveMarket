@@ -28,6 +28,9 @@ settings:
   impact-beyond-guard: 0.25
   # How many price points of history to keep per item.
   history-size: 50
+  # How many of your own past trades /market history keeps per player
+  # (newest first; older entries are dropped when the cap is reached).
+  trade-history-entries: 100
 
 # Storage backend: where prices, history and alerts live.
 # yaml (default): plugins/LiveMarket/data.yml — crash-safe, no setup.
