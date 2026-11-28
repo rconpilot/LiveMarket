@@ -81,6 +81,8 @@ public final class MarketManager {
         }
         player.getInventory().addItem(new ItemStack(material, amount));
         engine.applyTrade(material, amount, true);
+        store.recordTrade(player.getUniqueId(),
+                new Storage.TradeRecord(System.currentTimeMillis(), material, true, amount, unit, cost));
         store.markDirty();
         plugin.checkAlerts(material);
         debug.log("TRADE", who + " result=OK unit=" + Debug.f(unit) + " total=" + Debug.f(cost)
@@ -117,6 +119,8 @@ public final class MarketManager {
             return new TradeOutcome(Result.ECONOMY_ERROR, 0, unit);
         }
         engine.applyTrade(material, amount, false);
+        store.recordTrade(player.getUniqueId(),
+                new Storage.TradeRecord(System.currentTimeMillis(), material, false, amount, unit, gain));
         store.markDirty();
         plugin.checkAlerts(material);
         debug.log("TRADE", who + " result=OK unit=" + Debug.f(unit) + " gross=" + Debug.f(gross)

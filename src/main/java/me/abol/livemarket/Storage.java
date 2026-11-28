@@ -19,6 +19,15 @@ public interface Storage {
     /** One price alert: tell the player when an item goes above/below a price. */
     record Alert(Material material, boolean above, double target) {}
 
+    /**
+     * One completed trade in a player's own history: when it happened
+     * (epoch millis), what was traded, which side, how many, at what unit
+     * price, and the total actually paid (buy) or received (sell, after
+     * the fee). Only successful trades are recorded.
+     */
+    record TradeRecord(long time, Material material, boolean buy,
+                       int amount, double unit, double total) {}
+
     /** Load persisted state into the engine (and the alert map). */
     void load();
 
@@ -46,4 +55,14 @@ public interface Storage {
     List<Alert> collectTriggered(UUID player, Material material, double price);
 
     Map<UUID, List<Alert>> allAlerts();
+
+    // ---- trade history (in-memory in every backend; persisted by save) ----
+
+    /** Record one completed trade at the front of the player's history. */
+    void recordTrade(UUID player, TradeRecord record);
+
+    /** The player's trades, newest first (capped — see settings). */
+    List<TradeRecord> tradesOf(UUID player);
+
+    Map<UUID, List<TradeRecord>> allTrades();
 }

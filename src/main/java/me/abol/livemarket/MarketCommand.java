@@ -1,5 +1,8 @@
 package me.abol.livemarket;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -50,6 +53,7 @@ public final class MarketCommand implements CommandExecutor, TabCompleter {
             case "sellall" -> sellAll(sender);
             case "price" -> price(sender, args);
             case "top" -> top(sender);
+            case "history" -> history(sender, args);
             case "alert" -> alert(sender, args);
             case "alerts" -> alerts(sender);
             case "pause" -> admin(sender, () -> {
@@ -177,6 +181,67 @@ public final class MarketCommand implements CommandExecutor, TabCompleter {
                     "item", MarketGui.pretty(material),
                     "change", String.format("%+.1f", engine.dayChange(material)),
                     "price", Msg.money(engine.price(material)));
+        }
+    }
+
+    private void history(CommandSender sender, String[] args) {
+        Msg msg = plugin.msg();
+        if (!(sender instanceof Player player)) {
+            msg.send(sender, "player-only");
+            return;
+        }
+        if (!player.hasPermission("livemarket.use")) {
+            msg.send(sender, "no-permission");
+            return;
+        }
+        // /market history [item] [page] — the item and the page may come in
+        // either order; a bare number is a page, anything else is an item.
+        Material filter = null;
+        int page = 1;
+        for (int i = 1; i < args.length; i++) {
+            try {
+                page = Integer.parseInt(args[i]);
+                continue;
+            } catch (NumberFormatException ignored) {
+                // Not a page number — treat it as an item name.
+            }
+            Material material = Material.matchMaterial(args[i].toUpperCase(Locale.ROOT));
+            if (material == null || engine.def(material) == null) {
+                msg.send(sender, "unknown-item", "item", args[i]);
+                return;
+            }
+            filter = material;
+        }
+        List<Storage.TradeRecord> shown = new ArrayList<>();
+        for (Storage.TradeRecord record : store.tradesOf(player.getUniqueId())) {
+            if (filter == null || record.material() == filter) {
+                shown.add(record);
+            }
+        }
+        if (shown.isEmpty()) {
+            msg.send(player, "history-empty");
+            return;
+        }
+        int pageSize = 8;
+        int pages = (shown.size() + pageSize - 1) / pageSize;
+        if (page < 1 || page > pages) {
+            msg.send(player, "history-usage");
+            return;
+        }
+        msg.send(player, "history-header",
+                "page", String.valueOf(page), "pages", String.valueOf(pages));
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        for (int i = (page - 1) * pageSize; i < Math.min(shown.size(), page * pageSize); i++) {
+            Storage.TradeRecord record = shown.get(i);
+            String time = Instant.ofEpochMilli(record.time())
+                    .atZone(ZoneId.systemDefault()).format(fmt);
+            msg.send(player, "history-line",
+                    "time", time,
+                    "side", record.buy() ? "<green>BOUGHT</green>" : "<gold>SOLD</gold>",
+                    "amount", String.valueOf(record.amount()),
+                    "item", MarketGui.pretty(record.material()),
+                    "unit", Msg.money(record.unit()),
+                    "total", Msg.money(record.total()));
         }
     }
 
@@ -398,8 +463,9 @@ public final class MarketCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         List<String> out = new ArrayList<>();
         if (args.length == 1) {
-            for (String sub : List.of("buy", "sell", "sellall", "price", "top", "alert", "alerts",
-                    "pause", "resume", "reload", "setprice", "reset", "debug", "help")) {
+            for (String sub : List.of("buy", "sell", "sellall", "price", "top", "history",
+                    "alert", "alerts", "pause", "resume", "reload", "setprice", "reset",
+                    "debug", "help")) {
                 if (sub.startsWith(args[0].toLowerCase(Locale.ROOT))) {
                     out.add(sub);
                 }
@@ -410,8 +476,8 @@ public final class MarketCommand implements CommandExecutor, TabCompleter {
                     out.add(option);
                 }
             }
-        } else if (args.length == 2 && List.of("buy", "sell", "price", "alert", "setprice", "reset")
-                .contains(args[0].toLowerCase(Locale.ROOT))) {
+        } else if (args.length == 2 && List.of("buy", "sell", "price", "alert", "setprice", "reset",
+                "history").contains(args[0].toLowerCase(Locale.ROOT))) {
             for (Material material : engine.defs().keySet()) {
                 if (material.name().toLowerCase(Locale.ROOT).startsWith(args[1].toLowerCase(Locale.ROOT))) {
                     out.add(material.name());
